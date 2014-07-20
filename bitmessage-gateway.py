@@ -1,13 +1,15 @@
-#!/opt/rh/python27/root/usr/bin/python
+#!/usr/bin/python
 
 ## imports
 import os
 import re
 import time
-import time
+import datetime
 import argparse
 import logging
 import sys
+import threading
+import signal
 import xmlrpclib
 import json
 import smtplib
@@ -25,24 +27,27 @@ from email.MIMEText import MIMEText
 config = {
 	'domain_name' : 'godark.ca',
 	'mail_folder' : '/home/bitmessage/MailDir/new/',
-	'log_filename' : 'bitmessage-gateway/logs/bitmessage-gateway.log',
+	'log_filename' : '/var/log/bitmessage-gateway.log',
 	'process_interval' : 10,
 	'generic_receive_address_label' : 'goDark Generic Receive Address',
 	'registration_address_label' : 'goDark Registration Address',
 	'debug' : True,
 	'respond_to_invalid' : True,
-	'wait_for_send_op' : False
+	'wait_for_send_op' : False,
+	'private_mode' : True
 }
+
 
 ## API connection information
 api = {
 	'conn' : '',
 	'username' : 'bmapi',
-	'password' : 'VI4164OGqTqRkIt',
+	'password' : '9fKX4638aCNDbmZ',
 	'host' : '127.0.0.1',
 	'port' : '8442'
 
 }
+
 
 ## list of usernames to explicitly ban
 banned_usernames = {
@@ -77,8 +82,9 @@ banned_usernames = {
 	'support' : True
 }
 
-## open logger
-logging.basicConfig(filename=config['log_filename'],level=logging.INFO)
+
+## setup logging
+logging.basicConfig(filename=config['log_filename'],level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
 
 
 ## connect to Bitmessage API
@@ -90,14 +96,15 @@ def api_connect(module):
 	api['conn'] = xmlrpclib.ServerProxy('http://' + api['username'] + ':' + api['password'] + '@' + api['host'] + ':' + api['port'] + '/')
 	
 	## check if API is responding
-	response = api['conn'].add(2,2)
-	if not response == 4:
-		logging.info('Could not connect to Bitmessage API: ' + response)
-		return False
-	else:
+	try:
+		response = api['conn'].add(2,2)
 		logging.info(module + " module loaded Bitmessage API and started")
 		return True
-
+	
+	except:
+		logging.error('Could not connect to Bitmessage API ')
+		return False
+	
 
 ## find inbound address list for sending bitmessages from external email addresses
 def get_address_list():
@@ -133,7 +140,7 @@ def read_email(k):
 		message = f.read()
 		return message
 	except IOError:
-		logging.info('Could not read email: ' + config['mail_folder'] + k)
+		logging.error('Could not read email: ' + config['mail_folder'] + k)
 		return
 
 
@@ -145,7 +152,7 @@ def delete_email(k):
 	try:
 		os.remove(config['mail_folder'] + k)
 	except OSError:
-		logging.info('Could not delete email: ' + config['mail_folder'] + k)
+		logging.error('Could not delete email: ' + config['mail_folder'] + k)
 
 
 ## generate a bitmessage address for an incoming email adress
@@ -185,16 +192,16 @@ def send_bitmessage(bm_to_address, bm_from_address, bm_subject, bm_body, from_em
 
 			## show API responses
 			if config['debug']:
-				print api['conn'].getStatus(ackData)
+				logging.debug(api['conn'].getStatus(ackData))
 
 		## time and log successful send
 		time_stop = time.time()
 		time_total = int(time_stop - time_start)
-		logging.info('Sent bitmessage from ' + from_email + ' (' + bm_from_address + ') to ' + to_email + ' (' + bm_to_address + ') in ' + str(time_total) + ' seconds')
+		logging.info('Sent bitmessage from ' + from_email + ' to ' + to_email  + ' in ' + str(time_total) + ' seconds')
 
 	## just queue message
 	ackData = api['conn'].sendMessage(bm_to_address, bm_from_address, bm_subject, bm_body, 2)
-	logging.info('Sent bitmessage from ' + from_email + ' (' + bm_from_address + ') to ' + to_email + ' (' + bm_to_address + ') : QUEUED FOR DELIVERY')
+	logging.info('Sent bitmessage from ' + from_email + ' to ' + to_email + ' : QUEUED FOR DELIVERY')
 
 
 ## check for new bitmessages
@@ -207,8 +214,10 @@ def get_bitmessages():
 ## delete bitmessage
 def delete_bitmessage(msgid):
 
-	global api
+	global api, debug
 	api['conn'].trashMessage(msgid)
+	if config['debug']:
+		logging.debug('Deleted bitmessage')
 
 
 ## send outbound email
@@ -227,10 +236,10 @@ def send_email(receiver, sender, subject, body, bm_id):
 	## send message
 	try:
 		server.sendmail(sender, receiver, text)
-   		logging.info('Sent email from ' + sender + ' to ' + receiver)
+   		logging.info('Sent email from ' + sender + ' to ' + receiver) 
 		delete_bitmessage(bm_id)
 	except SMTPException as e:
-   		logging.info('Could not send email from ' + sender + ' to ' + receiver + ' : ' + e)
+   		logging.error('Could not send email from ' + sender + ' to ' + receiver + ' : ' + e)
 	
 	server.quit()
 
@@ -257,7 +266,7 @@ def add_new_user(address, email):
 
 	global api, config
 	api['conn'].addAddressBookEntry(address, base64.b64encode(email))
-	logging.info('Registered new user ' + email + ' (' + address + ')')
+	logging.info('Registered new user ' + email)
 
 
 ## send out registration confirmation
@@ -294,10 +303,10 @@ def send_registration_response(badFormat, badUsername, bm_to_address, bm_from_ad
 	## build message
 	subject = base64.b64encode('Registration Request Denied')
 	if badFormat:
-		logging.info('Received invalid registration request from ' + bm_to_address + ' for ' + email + ' (Invalid Username)')
+		logging.warn('Received invalid registration request from ' + bm_to_address + ' for ' + email + ' (Invalid Username)')
 		body = base64.b64encode('Your registration request for username ' + email + ' was dened because the submitted username format is invalid.\r\n\r\nPlease register an alpha-numeric only username with a length of 4-20 characters.')
 	else:
-		logging.info('Received invalid registration request from ' + bm_to_address + ' for ' + email + ' (Username In Use)')
+		logging.warn('Received invalid registration request from ' + bm_to_address + ' for ' + email + ' (Username In Use)')
 		body = base64.b64encode('Your registration request for username ' + email + ' was dened because the username is already in use!')
 	
 	## send message
@@ -306,13 +315,17 @@ def send_registration_response(badFormat, badUsername, bm_to_address, bm_from_ad
 
 
 ## delete address
-def delete_address(address):
+def delete_address(address, from_console = False):
 
 	## try to delete and don't worry about if it actually goes through
-	global api
+	global api, config
 	api['conn'].deleteAddressBookEntry(address)
 	api['conn'].deleteAddress(address)
-	print "Deleted address " + address
+	
+	if from_console:
+		print "Deleted address " + address
+	if config['debug']:
+		logging.debug('Deleted bitmessage address ' + address)
 
 
 ## check for new bitmessages to process
@@ -320,27 +333,33 @@ def check_messages():
 
 	global config
 
-	## check if new messages are available
-	messages = get_bitmessages()
-	if not messages:
-		return
+	## get all messages
+	all_messages = json.loads(api['conn'].getAllInboxMessages())['inboxMessages']	
 
+	## if no messages
+	if not all_messages:
+		return
 
 	## get all addresses 
 	address_list = get_address_list()
 	addressbook = get_addressbook()	
 
+	## loop through messages to find unread
+	for a_message in all_messages:
 
-	## loop through new messages
-	for message in messages:
+		## if already read, delete and break
+		if a_message['read'] == 1:
+			delete_bitmessage(a_message['msgid'])
+			continue
 
+		## if the message is unread, load it by ID to trigger the read flag
+		message = json.loads(api['conn'].getInboxMessageByID(a_message['msgid'], True))['inboxMessage'][0]
 
 		## find message ID
 		bm_id = message['msgid']
 
 		## check if receive address is a registration request
 		if message['toAddress'] == address_list[config['registration_address_label']]:
-
 
 			## check for deregister request
 			msg_subject = base64.b64decode(message['subject']).lower()
@@ -352,18 +371,19 @@ def check_messages():
 					if tmp_address == message['fromAddress']:
 						deregistered_email = tmp_email
 
-				## if the sender is actually registered
+				## if the sender is actually registered and wants to deregister
 				if deregistered_email:
+
+					logging.info('Processed deregistration request for user ' + deregistered_email)
 					delete_address(message['fromAddress'])
 					addressbook.pop(deregistered_email, None)
 
 					## send deregistration confirmation email
-					send_deregistration_verification(message['fromAddress'], address_list[config['registration_address_label']], deregisted_email)
-
+					send_deregistration_verification(message['fromAddress'], address_list[config['registration_address_label']], deregistered_email)
 
 				## bogus deregistration request
 				else:
-					logging.info('Purged malicious deregistration bitmessage from ' + message['fromAddress'])
+					logging.warn('Purged malicious deregistration bitmessage from ' + message['fromAddress'])
 
 
 			## check for registration request
@@ -382,27 +402,22 @@ def check_messages():
 					## if username is available
 					if not full_registration_user in addressbook and not registration_user in banned_usernames:
 
-						logging.info('Received registration request from ' + message['fromAddress'] + ' for username ' + full_registration_user)
+						logging.info('Received registration request for username ' + full_registration_user)
 						add_new_user(message['fromAddress'], full_registration_user)
 						addressbook[full_registration_user] = message['fromAddress']
 						send_registration_verification(message['fromAddress'], address_list[config['registration_address_label']], full_registration_user)
-
 
 					## username already taken
 					else:
 						send_registration_response(False, True, message['fromAddress'], address_list[config['registration_address_label']], full_registration_user)
 						
-
 				## if bad username format
 				else:
 					send_registration_response(True, False, message['fromAddress'], address_list[config['registration_address_label']], full_registration_user)
 
-
 			## remove message
 			delete_bitmessage(bm_id)
-
 			continue
-
 
 		## check if sender has an outbound email address, else purge
 		bm_sender = ''
@@ -410,20 +425,18 @@ def check_messages():
 			if tmp_address == message['fromAddress']:
 				bm_sender = tmp_email
 		if not bm_sender:
-			logging.info('Purged bitmessage from non-registered user ' + bm_sender)
+			logging.warn('Purged bitmessage from non-registered user ' + bm_sender)
 			delete_bitmessage(bm_id)
 			continue
 
 		## if receive address is bound to an email
 		bm_receiver = ''
 		bm_subject = ''
-		
 		if not message['toAddress'] == address_list[config['generic_receive_address_label']]:
 			for tmp_email, tmp_address in address_list.iteritems():
 				if tmp_address == message['toAddress']:
 					bm_receiver = tmp_email	
 					bm_subject = base64.b64decode(message['subject'])
-
 
 		## if sent to generic receiver address, build email address from subject
 		else:
@@ -431,29 +444,17 @@ def check_messages():
 			if len(bm_receiver) > 0:
 				bm_receiver = bm_receiver[0]
 
-
 		## if subject doesnt contain valid email, mark message as bad
 		if not bm_receiver:
-			logging.info('Received and purged message with unknown recipient (likely generic address and bad subject)')
+			logging.warn('Received and purged message with unknown recipient (likely generic address and bad subject)')
 			delete_bitmessage(bm_id)
 			continue
-
 
 		## handle removal of embedded BMG-FROM:: tag for replies
 		bm_subject = bm_subject.replace('BMG-FROM::' + bm_receiver + ' | ', '');
 
-
 		## get message contents
 		bm_body = base64.b64decode(message['message'])	
-
-
-		# ## print message details
-		# print "\nReady to process message:"
-		# print "\tFrom: " + bm_sender
-		# print "\tTo:   " + bm_receiver
-		# print "\tSub:  " + bm_subject
-		# print "\tMsg:  " + bm_body
-
 
 		## send message and delete bitmessage, bitches
 		send_email(bm_receiver, bm_sender, bm_subject, bm_body, bm_id)
@@ -473,35 +474,30 @@ def check_emails():
 	## get all addresses 
 	address_list = get_address_list()
 
-
 	## iterate through new messages
 	for k in dir:
-
 
 		## read email from file
 		msg_raw = read_email(k)
 		if not msg_raw:
-			logging.info('Could not open email file: ' + k)
+			logging.error('Could not open email file: ' + k)
 			continue
 
 		## extract header
 		msg_headers = Parser().parsestr(msg_raw)
 
-
 		## check if email was valid
 		if not msg_headers:
-			logging.info('Malformed email detected and purged')
+			logging.error('Malformed email detected and purged')
 			delete_email(k)
 			continue
-
 
 		## find email source and dest addresses
 		msg_sender    = msg_headers["Return-path"]
 
-
 		## failed delivery email
 		if msg_sender == '<>':
-			logging.info('Bounced email detected and purged')
+			logging.warn('Bounced email detected and purged')
 			delete_email(k)
 			continue
 
@@ -509,25 +505,21 @@ def check_emails():
 		msg_sender    = re.findall(r'[\w\.-]+@[\w\.-]+.[\w]+', msg_sender)[0]
 		msg_recipient = msg_headers["To"]
 
-
 		## check if we have valid sender and recipient details
 		if not msg_sender or not msg_recipient:
-			logging.info('Malformed email detected and purged')
+			logging.warn('Malformed email detected and purged')
 			delete_email(k)
 			continue
-        
 
 		## check if we have a recipient address for the receiving email
 		addressbook = get_addressbook()
 		if not msg_recipient in addressbook:
-			logging.info('Purged email for unknown user ' + msg_recipient)
+			logging.warn('Purged email destined for unknown user ' + msg_recipient)
 			delete_email(k)
 			continue
 
-
 		## set bitmessage destination address
 		bm_to_address = addressbook[msg_recipient]
-
 
 		## check to see if we need to generate a sending address for the source email address
 		if not msg_sender in address_list:
@@ -536,14 +528,12 @@ def check_emails():
 		else:
 			bm_from_address = address_list[msg_sender]
 
-
 		## find message subject
 		msg_subject = decode_header(msg_headers['subject'])[0]
 		if(msg_subject[1]):
 			msg_subject = unicode(msg_subject[0], msg_subject[1])
 		else:
 			msg_subject = msg_subject[0]
-
 
 		## find message body contents in plaintext
 		msg_tmp = email.message_from_string(msg_raw)
@@ -552,30 +542,21 @@ def check_emails():
 				if part.get_content_type() == 'text/plain':
 					msg_body = msg_body + part.get_payload() #
 
-
 		## print message status
-		# print "\nReady to send message:"
-		# print "\tFrom:     " + msg_sender + " (" + bm_from_address + ")"
-		# print "\tTo:       " + msg_recipient + " (" + bm_to_address + ")"
-		# print "\tSubject:  " + msg_subject
-		# print "\tMessage:  " + msg_body
-
+		logging.info('Received outbound email request from ' + msg_sender + ' to ' + msg_recipient)
 
 		## send message to bitmessage address
 		bm_subject = base64.b64encode('BMG-FROM::' + msg_sender + ' | ' + msg_subject)
 		bm_body = base64.b64encode(msg_body)
 		send_bitmessage(bm_to_address, bm_from_address, bm_subject, bm_body, msg_sender, msg_recipient)
 
-
 		## remove email file
 		delete_email(k)
 
 
-## main                                     
+## main  
 parser = argparse.ArgumentParser(description='An email <-> bitmessage gateway.')
-parser.add_argument('-e','--emails', help='Process email queue',required=False, action='store_true')
-parser.add_argument('-m','--messages', help='Process bitmessage queue',required=False, action='store_true')
-parser.add_argument('-l','--list', help='List known internal and external messages',required=False, action='store_true', default=True)
+parser.add_argument('-l','--list', help='List known internal and external messages',required=False, action='store_true')
 parser.add_argument('-d','--delete', help='Delete an address',required=False, default=False)
 parser.add_argument('-a','--add', help='Generate a new bitmessage address with given label',required=False, default=False)
 
@@ -583,24 +564,15 @@ args = parser.parse_args()
 
 
 ## call correct function
-if args.emails == True:
-	if api_connect('Email') == False:
+if args.list == True:
+	if api_connect('Address lister') == False:
 		sys.exit()
-	while True:
-		check_emails()
-		time.sleep(config['process_interval'])
-
-elif args.messages == True:
-	if api_connect('Bitessage') == False:
-		sys.exit()
-	while True:
-		check_messages()
-		time.sleep(config['process_interval'])
+	list_addresses()
 
 elif args.delete:
 	if api_connect('Address deleter') == False:
 		sys.exit()
-	delete_address(args.delete)	
+	delete_address(args.delete, True)	
 
 elif args.add:
 	if api_connect('Address adder') == False:
@@ -608,6 +580,16 @@ elif args.add:
 	generate_sender_address(args.add, True)
 
 else:
-	if api_connect('Address lister') == False:
+	if api_connect('Main') == False:
 		sys.exit()
-	list_addresses()
+
+	## run managers in threads
+	while True:
+
+		email_thread = threading.Thread(target=check_emails)
+		message_thread = threading.Thread(target=check_messages)
+		email_thread.start()
+		message_thread.start()
+		email_thread.join()
+		message_thread.join()
+		time.sleep(config['process_interval'])
