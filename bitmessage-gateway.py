@@ -26,15 +26,14 @@ from email.MIMEText import MIMEText
 ## system configuration details
 config = {
 	'domain_name' : 'godark.ca',
-	'mail_folder' : '/home/bitmessage/MailDir/new/',
+	'mail_folder' : '/home/your_user/MailDir/new/',
 	'log_filename' : '/var/log/bitmessage-gateway.log',
 	'process_interval' : 10,
-	'generic_receive_address_label' : 'goDark Generic Receive Address',
-	'registration_address_label' : 'goDark Registration Address',
+	'generic_receive_address_label' : 'Your Generic Receive Address',
+	'registration_address_label' : 'Your Registration Address',
 	'debug' : True,
 	'respond_to_invalid' : True,
 	'wait_for_send_op' : False,
-	'private_mode' : True
 }
 
 
@@ -42,7 +41,7 @@ config = {
 api = {
 	'conn' : '',
 	'username' : 'bmapi',
-	'password' : '9fKX4638aCNDbmZ',
+	'password' : '',
 	'host' : '127.0.0.1',
 	'port' : '8442'
 
