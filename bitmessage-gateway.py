@@ -25,18 +25,18 @@ from email.MIMEText import MIMEText
 
 ## system configuration details
 config = {
-	'domain_name' : 'yourdomain.com',
+	'domain_name' : 'godark.ca',
 	'mail_folder' : '/home/youruser/MailDir/new/',
 	'log_filename' : '/var/log/bitmessage-gateway.log',
 	'process_interval' : 10,
-	'generic_receive_address_label' : 'yourdomain.com Generic Receive Address',
-	'registration_address_label' : 'yourdomain.com Registration Address',
-	'deregistration_address_label' : 'yourdomain.com Deregistration Address',
-	'bug_report_address_bitmessage' : 'your bitmessage address',
-	'bug_report_address_email' : 'support@yourdomain.com',
+	'receiving_address_label' : 'goDark Generic Receive Address',
+	'sending_address_label' : 'goDark Generic Sender Address',
+	'registration_address_label' : 'goDark Registration Address',
+	'deregistration_address_label' : 'goDark Deregistration Address',
+	'bug_report_address_bitmessage' : 'BM-2cVFZippLaTJeH9n5WuKSXCGYs6onwNmr8',
+	'bug_report_address_email' : 'admin@godark.ca',
 	'debug' : True,
-	'respond_to_invalid' : True,
-	'wait_for_send_op' : False
+	'respond_to_invalid' : True
 }
 
 
@@ -230,28 +230,45 @@ def send_bitmessage(bm_to_address, bm_from_address, bm_subject, bm_body, from_em
 
 	global api, config
 
-	## only wait for send operation if set in config
-	if config['wait_for_send_op']:
+	# ## only wait for send operation if set in config
+	# if config['wait_for_send_op']:
 
-		## time and send message
-		time_start = time.time()
-		ackData = api['conn'].sendMessage(bm_to_address, bm_from_address, bm_subject, bm_body, 2)
+	# 	## time and send message
+	# 	time_start = time.time()
 
-		## wait for msg sent response from API
-		while not "msgsent" in api['conn'].getStatus(ackData):
-			time.sleep(10)
+	# 	## send it off
+	# 	while True:
+	# 		try:
+	#             ackData = api['conn'].sendMessage(bm_to_address, bm_from_address, bm_subject, bm_body, 2)
+	#         except SomeSpecificException:
+	#             continue
+	#         break
 
-			## show API responses
-			if config['debug']:
-				logging.debug(api['conn'].getStatus(ackData))
+	# 	ackData = api['conn'].sendMessage(bm_to_address, bm_from_address, bm_subject, bm_body, 2)
 
-		## time and log successful send
-		time_stop = time.time()
-		time_total = int(time_stop - time_start)
-		logging.info('Sent bitmessage from ' + from_email + ' to ' + to_email  + ' in ' + str(time_total) + ' seconds')
+	# 	## wait for msg sent response from API
+	# 	while not "msgsent" in api['conn'].getStatus(ackData):
+	# 		time.sleep(10)
 
-	## just queue message
-	ackData = api['conn'].sendMessage(bm_to_address, bm_from_address, bm_subject, bm_body, 2)
+	# 		## show API responses
+	# 		if config['debug']:
+	# 			logging.debug(api['conn'].getStatus(ackData))
+
+	# 	## time and log successful send
+	# 	time_stop = time.time()
+	# 	time_total = int(time_stop - time_start)
+	# 	logging.info('Sent bitmessage from ' + from_email + ' to ' + to_email  + ' in ' + str(time_total) + ' seconds')
+
+	## send message
+	while True:
+		try:
+			ackData = api['conn'].sendMessage(bm_to_address, bm_from_address, bm_subject, bm_body, 2)
+		except:
+			logging.warn('Could not send bitmessage via API. Retrying...')
+			continue
+		break
+
+	## log result
 	if config['debug']:
 		logging.info('Sent bitmessage from ' + from_email + ' to ' + to_email + ' : QUEUED FOR DELIVERY , API response: ' + ackData)
 	else:
@@ -261,8 +278,16 @@ def send_bitmessage(bm_to_address, bm_from_address, bm_subject, bm_body, from_em
 ## check for new bitmessages
 def get_bitmessages():
 
-	global api 
-	return json.loads(api['conn'].getAllInboxMessages())['inboxMessages']
+	global api
+
+	while True:
+		try:
+			messages = json.loads(api['conn'].getAllInboxMessages())['inboxMessages']
+		except:
+			logging.warn('Could not read inbox messages via API. Retrying...')
+			continue
+		break
+	return messages
 
 
 ## delete bitmessage
@@ -286,7 +311,7 @@ def send_email(receiver, sender, subject, body, bm_id):
 	msg['Subject'] = subject
 	msg.attach(MIMEText(body, 'plain'))
 	server = smtplib.SMTP('localhost')
-	server.set_debuglevel(1)
+	server.set_debuglevel(0)
 	text = msg.as_string()
 
 	## send message
@@ -309,12 +334,12 @@ def list_addresses():
 	global address_list, addressbook
 
 	## print all addresses 
-	print "\n####################################\nExternal Address List\n####################################"
+	print "\n####################################\nInternal Address List\n####################################"
 	for tmp_email in address_list:
 		print tmp_email + "\t\t\t" + address_list[tmp_email]
 	print ''
 	
-	print "\n####################################\nInternal Address List\n####################################"
+	print "\n####################################\nUser List\n####################################"
 	for tmp_email in addressbook:
 		print tmp_email + "\t\t\t" + addressbook[tmp_email]
 	print ""
@@ -338,7 +363,21 @@ def send_registration_verification(bm_to_address, bm_from_address, email):
 
 	## build message
 	subject = base64.b64encode('Registration Request Accepted')
-	body = base64.b64encode('Thank you for your registration request for ' + email + '. Your account is now set up and ready to use!\r\n\r\nTo deregister your email, simply send a message from this address to ' + address_list[config['deregistration_address_label']] + '.\r\n\r\nNote: this service is still in Beta! Please send any comments/bug reports to\r\n' + config['bug_report_address_bitmessage'] + '  or\r\n' + config['bug_report_address_email'] + '.\r\n\r\n***************************\r\nIf you send a message and Bitmessage does not show the message as acknowledged, please wait 5 minutes before sending again!\r\n***************************')
+	body = 'Thank you for your registration request for ' + email + '. Your account is now set up and ready to use!\r\n\r\n'
+	body = body + '*** Sending Emails ***\r\n'
+	body = body + 'To send anonymous emails to the Internet, send a bitmessage to ' + address_list[config['receiving_address_label']] + ' with the destination email address in the subject line.\r\n\r\n'
+	body = body + '*** Deregistering Your Account ***\r\n'
+	body = body + 'To deregister, simply send a message from this address to ' + address_list[config['deregistration_address_label']] + '.\r\n\r\n'
+	body = body + '*** ' + config['domain_name'] + ' Addresses to Trust (Add to Address Book) ***\r\n'
+	body = body + 'Registration Address:       ' + address_list[config['registration_address_label']] + '\r\n'
+	body = body + 'Deregistration Address:     ' + address_list[config['deregistration_address_label']] + '\r\n'
+	body = body + 'Outbound Messages Address:  ' + address_list[config['receiving_address_label']] + '\r\n'
+	body = body + 'Inbound Messages Address:   ' + address_list[config['sending_address_label']] + '\r\n\r\n'
+	body = body + '*** Stuck Messages ***\r\n'	
+	body = body + 'If you have sent a message to this service and Bitmessage does not show the message status as \'Acknowledged\' after 10 minutes, please send it again.\r\n\r\n'	
+	body = body + '*** Reporting Bugs ***\r\n'	
+	body = body + 'This service is still in Beta! Please send any comments/bug reports to ' + config['bug_report_address_email'] + ' or send us a bitmessage at ' + config['bug_report_address_bitmessage'] + '.\r\n\r\n'
+	body = base64.b64encode(body)
 
 	## send message
 	send_bitmessage(bm_to_address, bm_from_address, subject, body, 'register@' + config['domain_name'], email)
@@ -369,7 +408,7 @@ def send_registration_response(badFormat, badUsername, bm_to_address, bm_from_ad
 		body = base64.b64encode('Your registration request for username ' + email + ' was dened because the submitted username format is invalid.\r\n\r\nPlease register an alpha-numeric only username with a length of 4-20 characters. We will add the ' + config['domain_name'] + ' suffix automatically!')
 	else:
 		logging.warn('Received invalid registration request from ' + bm_to_address + ' for ' + email + ' (Username In Use)')
-		body = base64.b64encode('Your registration request for username ' + email + ' was dened because the username is already in use!')
+		body = base64.b64encode('Your registration request for username ' + email + ' was dened because the username is reserved or already in use!')
 	
 	## send message
 	if config['respond_to_invalid']:
@@ -477,7 +516,6 @@ def check_messages():
 					logging.info('Received registration request for username ' + full_registration_user)
 					add_new_user(message['fromAddress'], full_registration_user)
 					addressbook[full_registration_user] = message['fromAddress']
-					print addressbook
 					send_registration_verification(message['fromAddress'], address_list[config['registration_address_label']], full_registration_user)
 
 				## username already taken
@@ -489,7 +527,7 @@ def check_messages():
 				send_registration_response(True, False, message['fromAddress'], address_list[config['registration_address_label']], proposed_registration_user)
 
 
-		## check if receive address is the generic receive address or specific address
+		## if sent to the generic receiver or sender address
 		else:
 
 			## find message id
@@ -498,7 +536,6 @@ def check_messages():
 			## if user is not registered, purge
 			is_registered = is_address_registered(message['fromAddress'])
 			if not is_registered:
-
 				logging.warn('Purged bitmessage from non-registered user ' + message['fromAddress'])
 				delete_bitmessage(bm_id)
 				continue
@@ -507,24 +544,46 @@ def check_messages():
 			else:
 				bm_sender = find_username(message['fromAddress'])
 
-			## if receive address is the generic receiver
-			if message['toAddress'] == address_list[config['generic_receive_address_label']]:
-
-				bm_receiver = re.findall(r'[\w\.-]+@[\w\.-]+\.[\w]+', base64.b64decode(message['subject']))
-				if len(bm_receiver) > 0:
-					bm_receiver = bm_receiver[0]
-				bm_subject = ''
-
-			## if bound for unknown address, see if it maps back to an email
-			else:
-				bm_receiver = find_internet_mapping(message['toAddress'])
-				bm_subject = base64.b64decode(message['subject'])
-
+			## find outbound email address
+			bm_receiver = re.findall(r'[\w\.-]+@[\w\.-]+\.[\w]+', base64.b64decode(message['subject']))
+			if len(bm_receiver) > 0:
+				bm_receiver = bm_receiver[0]
+			
 			## if there is no receiver mapping or the generic address didnt get a valid outbound email, deny it
 			if not bm_receiver:
 				logging.warn('Received and purged bitmessage with unknown recipient (likely generic address and bad subject)')
 				delete_bitmessage(bm_id)
 				continue
+
+
+			# ## if receive address is the generic receiver
+			# if message['toAddress'] == address_list[config['receiving_address_label']]:
+
+			# 	bm_receiver = re.findall(r'[\w\.-]+@[\w\.-]+\.[\w]+', base64.b64decode(message['subject']))
+			# 	if len(bm_receiver) > 0:
+			# 		bm_receiver = bm_receiver[0]
+			# 	bm_subject = ''
+
+			# elif message['toAddress'] == address_list[config['sending_address_label']]:
+
+
+
+			# ## if bound for unknown address, see if it maps back to an email
+			# else:
+			# 	bm_receiver = find_internet_mapping(message['toAddress'])
+			
+			## find message subject
+			if message['toAddress'] == address_list[config['receiving_address_label']]:
+				bm_subject = ''
+			else:
+				bm_subject = base64.b64decode(message['subject'])
+			
+
+			# ## if there is no receiver mapping or the generic address didnt get a valid outbound email, deny it
+			# if not bm_receiver:
+			# 	logging.warn('Received and purged bitmessage with unknown recipient (likely generic address and bad subject)')
+			# 	delete_bitmessage(bm_id)
+			# 	continue
 
 			## handle removal of embedded BMG-FROM:: tag for replies
 			bm_subject = bm_subject.replace('BMG-FROM::' + bm_receiver + ' | ', '');
@@ -572,11 +631,11 @@ def check_emails():
 			continue
 
 		## find email source and dest addresses
-		msg_sender    = msg_headers["Return-path"]
+		msg_sender    = msg_headers["From"]
 
 		## failed delivery email
 		if msg_sender == '<>':
-			msg_sender = config['generic_receive_address_label']
+			msg_sender = config['sending_address_label']
 		else:
 			msg_sender    = re.findall(r'[\w\.-]+@[\w\.-]+.[\w]+', msg_sender)[0]
 
@@ -599,11 +658,11 @@ def check_emails():
 		bm_to_address = addressbook[msg_recipient]
 
 		## check to see if we need to generate a sending address for the source email address
-		if not msg_sender in address_list:
-			bm_from_address = generate_sender_address(msg_sender)
-			address_list[msg_sender] = bm_from_address
-		else:
-			bm_from_address = address_list[msg_sender]
+		# if not msg_sender in address_list:
+		# 	bm_from_address = generate_sender_address(msg_sender)
+		# 	address_list[msg_sender] = bm_from_address
+		# else:
+		bm_from_address = address_list[config['sending_address_label']]
 
 		## find message subject
 		msg_subject = decode_header(msg_headers['subject'])[0]
@@ -620,8 +679,8 @@ def check_emails():
 					msg_body = msg_body + part.get_payload() #
 
 		## print message status and set correct subject
-		## if bounded email
-		if msg_sender == config['generic_receive_address_label']:
+		## if bounced email
+		if msg_sender == config['sending_address_label']:
 			logging.info('Received bounced email... forwarding to ' + msg_recipient)
 			bm_subject = base64.b64encode('postmaster@' + config['domain_name'])
 		## if normal email
