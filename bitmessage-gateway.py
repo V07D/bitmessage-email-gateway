@@ -26,7 +26,7 @@ from email.MIMEText import MIMEText
 ## system configuration details
 config = {
 	'domain_name' : 'godark.ca',
-	'mail_folder' : '/home/youruser/MailDir/new/',
+	'mail_folder' : '/home/bitmessage/MailDir/new/',
 	'log_filename' : '/var/log/bitmessage-gateway.log',
 	'process_interval' : 10,
 	'receiving_address_label' : 'goDark Generic Receive Address',
