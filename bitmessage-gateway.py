@@ -15,6 +15,10 @@ import json
 import smtplib
 import base64
 import email
+import urllib
+import urllib2
+import gnupg
+from BeautifulSoup import BeautifulSoup
 from email.parser import Parser
 from email.header import decode_header
 from email.MIMEMultipart import MIMEMultipart
@@ -86,13 +90,112 @@ banned_usernames = {
 	'bugs' : True
 }
 
+## supported PGP keyservers
+key_servers = {
+	'sks-keyservers' : {
+		'url' : 'https://hkps.pool.sks-keyservers.net',
+		'begin' : '/pks/lookup?search=',
+		'end' : '&op=index&exact=on',
+	},
+	'mit': {
+		'url' : 'https://pgp.mit.edu',
+		'begin' : '/pks/lookup?search=',
+		'end' : '&op=index&exact=on'
+	}
+}
+
+## GPG key cache
+gpg = gnupg.GPG(gnupghome='/home/bitmessage/GPG-Keys')
 
 ## setup logging
-logging.basicConfig(filename=config['log_filename'],level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
+if config['debug']:
+	logging.basicConfig(filename=config['log_filename'],level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
+else:
+	logging.basicConfig(filename=config['log_filename'],level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 
 ## address book and address list placeholders
 address_list = {}
 addressbook = {}
+
+
+## lookup PGP key by email
+def find_pgp_key(email):
+
+	for server in key_servers:
+
+		## try to grab key
+		try:
+			soup = BeautifulSoup(urllib2.urlopen(key_servers[server]['url'] + key_servers[server]['begin'] + urllib.quote(email) + key_servers[server]['end']).read())
+
+			## extract key result
+			key_url = ''
+			for item in soup(text=re.compile(r'pub ')):
+				key_url = key_servers[server]['url'] + item.parent('a')[0].get('href')
+
+			## if no result, continue seaching
+			if not key_url:
+				continue
+
+			## find key value by following href url
+			key = ''
+			key_soup = BeautifulSoup(urllib2.urlopen(key_url))
+			key = key_soup.find('pre').getText()
+			
+			## if no key is found (error), continue
+			if not key:
+				continue
+			else:
+				import_gpg_key(key)
+				return True
+
+		## if there is an error
+		except urllib2.URLError, e:
+			
+			## no key available, so return
+			if e == 'HTTP Error 404: Not found':
+				continue
+
+			## something went wrong!
+			else:
+				logging.error('PGP keyfinder encountered an error when contacting the ' + server + ' keyserver: ' + str(e))
+
+	return False
+
+
+## add GPG locally
+def import_gpg_key(key):
+
+	global gpg
+	import_result = gpg.import_keys(key)		
+	logging.info('Imported GPG key')
+
+
+## check if we have a GPG key for destination email
+def check_gpg_key(email):
+
+	global gpg
+	for key in gpg.list_keys():
+		if key['uids'][0].split('<')[1][:-1] == email:
+			return key['fingerprint']
+	return False
+
+
+## encrypt text
+## Note: you must patch /usr/share/pyshared/gnupg.py to enable --trust-model always
+    # def encrypt_file(self, file, recipients, sign=None,
+    # 	[...]
+    #     else:
+    #         args = ['--encrypt']
+    #         if not _is_sequence(recipients):
+    #             recipients = (recipients,)
+    #         for recipient in recipients:
+    #             args.extend(['--recipient', shell_quote(recipient)])    
+    #         args.extend(['--trust-model', 'always'])					<---- ADD THIS!
+def encrypt_text(text, fingerprint):
+
+	global gpg
+	return str(gpg.encrypt(text, fingerprint))
+
 
 ## connect to Bitmessage API
 def api_connect(module):
@@ -230,35 +333,6 @@ def send_bitmessage(bm_to_address, bm_from_address, bm_subject, bm_body, from_em
 
 	global api, config
 
-	# ## only wait for send operation if set in config
-	# if config['wait_for_send_op']:
-
-	# 	## time and send message
-	# 	time_start = time.time()
-
-	# 	## send it off
-	# 	while True:
-	# 		try:
-	#             ackData = api['conn'].sendMessage(bm_to_address, bm_from_address, bm_subject, bm_body, 2)
-	#         except SomeSpecificException:
-	#             continue
-	#         break
-
-	# 	ackData = api['conn'].sendMessage(bm_to_address, bm_from_address, bm_subject, bm_body, 2)
-
-	# 	## wait for msg sent response from API
-	# 	while not "msgsent" in api['conn'].getStatus(ackData):
-	# 		time.sleep(10)
-
-	# 		## show API responses
-	# 		if config['debug']:
-	# 			logging.debug(api['conn'].getStatus(ackData))
-
-	# 	## time and log successful send
-	# 	time_stop = time.time()
-	# 	time_total = int(time_stop - time_start)
-	# 	logging.info('Sent bitmessage from ' + from_email + ' to ' + to_email  + ' in ' + str(time_total) + ' seconds')
-
 	## send message
 	while True:
 		try:
@@ -304,27 +378,48 @@ def delete_bitmessage(msgid):
 ## send outbound email
 def send_email(receiver, sender, subject, body, bm_id):
 
+	## open connection
+	server = smtplib.SMTP('localhost')
+	server.set_debuglevel(0)
+
 	## build message
 	msg = MIMEMultipart()
 	msg['From'] = sender
 	msg['To'] = receiver
 	msg['Subject'] = subject
-	msg.attach(MIMEText(body, 'plain'))
-	server = smtplib.SMTP('localhost')
-	server.set_debuglevel(0)
+
+	## check if we can encrypt the email
+	fingerprint = check_gpg_key(receiver)
+
+	## if we already have a PGP key cached
+	if fingerprint:
+		body = encrypt_text(body, fingerprint)
+
+	## search for PGP key
+	else:
+		if find_pgp_key(receiver):
+			fingerprint = check_gpg_key(receiver)
+			body = encrypt_text(body, fingerprint)
+
+	## encode as needed
+	body = MIMEText(body, 'plain')
+
+	## attach body with correct encoding
+	msg.attach(body)
 	text = msg.as_string()
 
 	## send message
-	try:
-		server.sendmail(sender, receiver, text)
-   		logging.info('Sent email from ' + sender + ' to ' + receiver) 
-		delete_bitmessage(bm_id)
+	status = server.sendmail(sender, receiver, text)
+	server.close()
 
-	## send failed
-	except SMTPException as e:
-   		logging.error('Could not send email from ' + sender + ' to ' + receiver + ' : ' + e)
+	## check for errors
+	for address in status:
+		logging.error('Could not send email from ' + sender + ' to ' + receiver + ' : ' + status[address])
+	if not status:
+   		logging.info('Sent email from ' + sender + ' to ' + receiver) 
 	
-	server.quit()
+   	## delete bitmessage
+	delete_bitmessage(bm_id)
 
 
 ## list known addresses
@@ -554,23 +649,6 @@ def check_messages():
 				logging.warn('Received and purged bitmessage with unknown recipient (likely generic address and bad subject)')
 				delete_bitmessage(bm_id)
 				continue
-
-
-			# ## if receive address is the generic receiver
-			# if message['toAddress'] == address_list[config['receiving_address_label']]:
-
-			# 	bm_receiver = re.findall(r'[\w\.-]+@[\w\.-]+\.[\w]+', base64.b64decode(message['subject']))
-			# 	if len(bm_receiver) > 0:
-			# 		bm_receiver = bm_receiver[0]
-			# 	bm_subject = ''
-
-			# elif message['toAddress'] == address_list[config['sending_address_label']]:
-
-
-
-			# ## if bound for unknown address, see if it maps back to an email
-			# else:
-			# 	bm_receiver = find_internet_mapping(message['toAddress'])
 			
 			## find message subject
 			if message['toAddress'] == address_list[config['receiving_address_label']]:
@@ -578,13 +656,6 @@ def check_messages():
 			else:
 				bm_subject = base64.b64decode(message['subject'])
 			
-
-			# ## if there is no receiver mapping or the generic address didnt get a valid outbound email, deny it
-			# if not bm_receiver:
-			# 	logging.warn('Received and purged bitmessage with unknown recipient (likely generic address and bad subject)')
-			# 	delete_bitmessage(bm_id)
-			# 	continue
-
 			## handle removal of embedded BMG-FROM:: tag for replies
 			bm_subject = bm_subject.replace('BMG-FROM::' + bm_receiver + ' | ', '');
 
@@ -598,7 +669,6 @@ def check_messages():
 		## remove message
 		delete_bitmessage(bm_id)
 		
-
 
 ## check for new mail to process
 def check_emails():
@@ -657,11 +727,7 @@ def check_emails():
 		## set bitmessage destination address
 		bm_to_address = addressbook[msg_recipient]
 
-		## check to see if we need to generate a sending address for the source email address
-		# if not msg_sender in address_list:
-		# 	bm_from_address = generate_sender_address(msg_sender)
-		# 	address_list[msg_sender] = bm_from_address
-		# else:
+		## set from address
 		bm_from_address = address_list[config['sending_address_label']]
 
 		## find message subject
