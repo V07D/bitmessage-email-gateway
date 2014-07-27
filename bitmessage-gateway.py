@@ -87,7 +87,11 @@ banned_usernames = {
 	'sales' : True, 
 	'support' : True,
 	'bug' : True,
-	'bugs' : True
+	'bugs' : True,
+	'register' : True,
+	'deregister' : True,
+	'registration' : True,
+	'deregistration' : True
 }
 
 ## supported PGP keyservers
@@ -595,11 +599,11 @@ def check_messages():
 				
 				# strip domain if they sent it during registration
 				if valid_one:
-					full_registration_user = proposed_registration_user + '@' + config['domain_name']
-					registration_user = proposed_registration_user
+					full_registration_user = proposed_registration_user.lower() + '@' + config['domain_name']
+					registration_user = proposed_registration_user.lower()
 				else:
-					full_registration_user = proposed_registration_user
-					registration_user = proposed_registration_user.split('@')[0]
+					full_registration_user = proposed_registration_user.lower()
+					registration_user = proposed_registration_user.split('@')[0].lower()
 
 				## check if address is already registered to a username or is banned
 				is_double_registered = is_address_registered(message['fromAddress'])
@@ -710,7 +714,7 @@ def check_emails():
 			msg_sender    = re.findall(r'[\w\.-]+@[\w\.-]+.[\w]+', msg_sender)[0]
 
 		## find email details
-		msg_recipient = msg_headers["To"]
+		msg_recipient = re.findall(r'[\w\.-]+@[\w\.-]+.[\w]+', msg_headers["To"])[0]
 
 		## check if we have valid sender and recipient details
 		if not msg_sender or not msg_recipient:
@@ -720,7 +724,7 @@ def check_emails():
 
 		## check if we have a recipient address for the receiving email
 		if not msg_recipient in addressbook:
-			logging.warn('Purged email destined for unknown user ' + msg_recipient)
+			logging.warn('Purged email destined for unknown user ' + msg_recipient + ' from ' + msg_sender)
 			delete_email(k)
 			continue
 
