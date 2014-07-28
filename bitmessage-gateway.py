@@ -18,6 +18,7 @@ import email
 import urllib
 import urllib2
 import gnupg
+import html2text
 from BeautifulSoup import BeautifulSoup
 from email.parser import Parser
 from email.header import decode_header
@@ -507,7 +508,7 @@ def send_registration_response(badFormat, badUsername, bm_to_address, bm_from_ad
 		body = base64.b64encode('Your registration request for username ' + email + ' was dened because the submitted username format is invalid.\r\n\r\nPlease register an alpha-numeric only username with a length of 4-20 characters. We will add the ' + config['domain_name'] + ' suffix automatically!')
 	else:
 		logging.warn('Received invalid registration request from ' + bm_to_address + ' for ' + email + ' (Username In Use)')
-		body = base64.b64encode('Your registration request for username ' + email + ' was dened because the username is reserved or already in use!')
+		body = base64.b64encode('Your registration request for username ' + email + ' was dened because the username is reserved, already in use, or you have already registered an address!')
 	
 	## send message
 	if config['respond_to_invalid']:
@@ -746,8 +747,14 @@ def check_emails():
 		msg_body = ''
 		for part in msg_tmp.walk():
 				if part.get_content_type() == 'text/plain':
-					msg_body = msg_body + part.get_payload() #
-
+					msg_body = msg_body + part.get_payload()
+		
+		## if there's no plaintext content, convert the html
+		if not msg_body:
+			for part in msg_tmp.walk():
+                                if part.get_content_type() == 'text/html':
+					msg_body = msg_body + html2text.html2text(part.get_payload())		
+	
 		## print message status and set correct subject
 		## if bounced email
 		if msg_sender == config['sending_address_label']:
