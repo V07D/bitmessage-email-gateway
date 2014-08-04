@@ -767,14 +767,17 @@ def check_emails():
 		msg_tmp = email.message_from_string(msg_raw)
 		msg_body = ''
 		for part in msg_tmp.walk():
-				if part.get_content_type() == 'text/plain':
-					msg_body = msg_body + part.get_payload()
+			if part.get_content_type() == 'text/plain':
+				part_str = part.get_payload(decode=1)
+				msg_body = msg_body + part_str.decode(part.get_content_charset())
 		
 		## if there's no plaintext content, convert the html
 		if not msg_body:
 			for part in msg_tmp.walk():
                                 if part.get_content_type() == 'text/html':
-					msg_body = msg_body + html2text.html2text(part.get_payload())		
+					part_str = part.get_payload(decode=1)
+					msg_body = msg_body + part_str.decode(part.get_content_charset())
+					#msg_body = msg_body + html2text.html2text(unicode(part.get_payload(), part.get_content_charset()))		
 	
 		## print message status and set correct subject
 		## if bounced email
