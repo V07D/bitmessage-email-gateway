@@ -7,13 +7,12 @@ This software will take a standard email MTA setup using a catchall address and 
 
 For more information about Bitmessage, please visit https://www.bitmessage.org
 
-For an example of a live version of this software, please visit https://www.godark.ca
 
 
 ## Features
  * Allows users to register for and deregister from the service via Bitmessage
  * Drops message requests from unregistered users
- * Allows registered users to send emails from their registered account to the Internet using their Bitmessage client software (see https://www.godark.ca for more information)
+ * Allows registered users to send emails from their registered account to the Internet using their Bitmessage client software 
  * Allows Internet users to send messages to registered users using the user's @domain.com email address
  * Auto purges bitmessages and emails immediately after sending
  * Transparently encrypts emails destined for addresses with published PGP keys (multiple key servers supported)
@@ -120,8 +119,4 @@ goDark Generic Sender Address                   BM-2cWPQvSfwEzDnG8xd8DGwz1p3Lj8F
 
 ## Comments / Bug Reports
 Fork away if you're a developer ;)
-
-Email: admin@godark.ca
-
-Bitmessage: BM-2cWVu29tHfapydEsyQh6acsm4GX7mWE6FY
 
