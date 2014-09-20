@@ -125,4 +125,3 @@ Email: admin@godark.ca
 
 Bitmessage: BM-2cWVu29tHfapydEsyQh6acsm4GX7mWE6FY
 
-Live Service: https://www.godark.ca
